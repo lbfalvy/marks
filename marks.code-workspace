@@ -1,0 +1,23 @@
+{
+	"folders": [
+		{
+			"path": "."
+		}
+	],
+	"settings": {
+		"dotnet.defaultSolution": "MarksClient.sln",
+		"rust-analyzer.rustfmt.overrideCommand": [
+			"cargo",
+			"+nightly",
+			"fmt"
+		],
+		"sqltools.connections": [
+			{
+				"previewLimit": 50,
+				"driver": "SQLite",
+				"name": "Marks server",
+				"database": "server/database.sqlite"
+			}
+		],
+	}
+}

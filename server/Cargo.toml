@@ -1,0 +1,23 @@
+[package]
+name = "server"
+version = "0.1.0"
+edition = "2021"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+actix-cors = "0.7.0"
+actix-web = "4.5.1"
+common = { path = "../common" }
+serde = { version = "1.0.197", features = ["std", "derive"] }
+serde_json = "1.0.114"
+diesel = { version = "2.1", features = ["sqlite", "r2d2"] }
+dotenvy = "0.15.7"
+jwt = "0.16.0"
+hmac = "0.12.1"
+sha2 = "0.10.8"
+futures-util = "0.3.30"
+rand = "0.8.5"
+pwhash = "1.0.0"
+r2d2 = { version = "0.8.10" }
+itertools = "0.12.1"

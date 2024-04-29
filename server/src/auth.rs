@@ -15,6 +15,10 @@ use crate::bearer_token::{make_token, BearerToken, TokenError};
 use crate::db::{DbPool, Session, User};
 use crate::schema::{session, user};
 
+pub fn cfg_auth(cfg: &mut web::ServiceConfig) {
+  cfg.service(register).service(login).service(refresh).service(change_pass);
+}
+
 pub struct AuthdUser {
   pub id: i64,
   pub name: String,
@@ -163,56 +167,45 @@ impl ResponseError for LoginError {
   }
 }
 
-pub fn get_user_by_name(conn: &mut SqliteConnection, n: &str) -> Option<User> {
-  use crate::schema::user::dsl::*;
-  user.filter(name.eq(n)).select(User::as_select()).load(conn).unwrap().pop()
-}
-
-pub fn get_sessions_by_user_id(conn: &mut SqliteConnection, id: i64) -> Vec<Session> {
-  use crate::schema::session::dsl::*;
-  session.filter(user_id.eq(id)).select(Session::as_select()).load(conn).unwrap()
-}
-
-pub async fn login_logic(
+async fn login_logic(
   pool: web::Data<DbPool>,
   form: UserDataForm,
 ) -> actix_web::Result<(User, Session, TokenPair)> {
-  let user = web::block({
-    let (pool, name) = (pool.clone(), form.name.clone());
-    move || get_user_by_name(&mut *pool.get().unwrap(), &*name)
-  })
+  let user @ User { id: userid, .. } = web::block(clone!(pool, form; move || {
+    use crate::schema::user::dsl::*;
+    user.filter(name.eq(form.name))
+      .select(User::as_select())
+      .load(&mut pool.get().unwrap()).unwrap()
+      .into_iter().at_most_one().unwrap()
+  }))
   .await?
   .ok_or_else(|| actix_web::Error::from(LoginError::NoUser))?;
   if !pwhash::bcrypt::verify(&*form.pass, &*user.pass_hash) {
     return Err(actix_web::Error::from(LoginError::BadPass));
   }
-  let mut sessions = web::block({
-    let (id, pool) = (user.id, pool.clone());
-    move || get_sessions_by_user_id(&mut *pool.get().unwrap(), id)
-  })
+  let mut sessions = web::block(clone!(pool; move || {
+    use crate::schema::session::dsl::*;
+    session.filter(user_id.eq(userid))
+      .select(Session::as_select())
+      .load(&mut pool.get().unwrap()).unwrap()
+  }))
   .await?;
   let now = epoch_secs(SystemTime::now()) as i64;
   let split_point = partition(&mut sessions, |s| now < s.refresh);
   let dropping = sessions.drain(split_point..).map(|s| s.token).collect_vec();
-  web::block({
-    let pool = pool.clone();
-    move || {
-      use crate::schema::session::dsl::*;
-      let mut conn = pool.get().unwrap();
-      diesel::delete(session.filter(token.eq_any(dropping))).execute(&mut conn).unwrap();
-    }
-  })
+  web::block(clone!(pool; move || {
+    use crate::schema::session::dsl::*;
+    diesel::delete(session.filter(token.eq_any(dropping)))
+      .execute(&mut pool.get().unwrap()).unwrap();
+  }))
   .await?;
-  let (ses, tpair) = web::block({
-    let user = user.clone();
-    move || start_session(&mut *pool.get().unwrap(), &user)
-  })
-  .await?;
+  let (ses, tpair) =
+    web::block(clone!(user; move || start_session(&mut *pool.get().unwrap(), &user))).await?;
   Ok((user, ses, tpair))
 }
 
 #[post("/auth/login")]
-pub async fn login(
+async fn login(
   pool: web::Data<DbPool>,
   form: web::Json<UserDataForm>,
 ) -> actix_web::Result<impl Responder> {
@@ -245,19 +238,8 @@ impl ResponseError for RefreshError {
   }
 }
 
-pub fn get_session_by_user_start(
-  conn: &mut SqliteConnection,
-  uid: i64,
-  startt: SystemTime,
-) -> Option<Session> {
-  use crate::schema::session::dsl::*;
-  let start_ts = epoch_secs(startt) as i64;
-  let qry = session.filter(user_id.eq(uid).and(start.eq(start_ts))).select(Session::as_select());
-  qry.load(conn).unwrap().into_iter().exactly_one().ok()
-}
-
 #[post("/auth/refresh")]
-pub async fn refresh(
+async fn refresh(
   pool: web::Data<DbPool>,
   bearer: BearerToken,
 ) -> actix_web::Result<impl Responder> {
@@ -265,9 +247,13 @@ pub async fn refresh(
     return Err(actix_web::Error::from(RefreshError::NotRefresh));
   }
   let uid: i64 = bearer.claims.get("user_id").unwrap().parse().unwrap();
-  let start = from_epoch_secs(bearer.claims.get("start").unwrap().parse::<u64>().unwrap());
-  let ses = clone!(pool; web::block(move || {
-    get_session_by_user_start(&mut *pool.get().unwrap(), uid, start)
+  let start_ts = bearer.claims.get("start").unwrap().parse::<u64>().unwrap();
+  let ses = web::block(clone!(pool; move || {
+    use crate::schema::session::dsl::*;
+    session.filter(user_id.eq(uid).and(start.eq(start_ts as i64)))
+      .select(Session::as_select())
+      .load(&mut pool.get().unwrap()).unwrap()
+      .into_iter().exactly_one().ok()
   }))
   .await?
   .ok_or_else(|| actix_web::Error::from(RefreshError::ForceEnd))?;
@@ -278,15 +264,14 @@ pub async fn refresh(
     uid.to_string(),
     bearer.claims.get("name").unwrap().to_string(),
     SystemTime::now(),
-    start,
+    from_epoch_secs(start_ts),
   );
   let refresh_token = tpair.refresh_token.clone();
   web::block(move || {
     use crate::schema::session::dsl::*;
-    let mut conn = pool.get().unwrap();
     diesel::update(session.find(ses.token))
       .set(token.eq(refresh_token))
-      .execute(&mut conn)
+      .execute(&mut pool.get().unwrap())
       .unwrap();
   })
   .await?;
@@ -294,7 +279,7 @@ pub async fn refresh(
 }
 
 #[post("/auth/change_pass")]
-pub async fn change_pass(
+async fn change_pass(
   pool: web::Data<DbPool>,
   form: web::Json<ChangePassForm>,
 ) -> actix_web::Result<impl Responder> {
@@ -304,8 +289,10 @@ pub async fn change_pass(
   let new_hash = pwhash::bcrypt::hash(&form.new_pass).unwrap();
   web::block(move || {
     use crate::schema::user::dsl::*;
-    let mut conn = pool.get().unwrap();
-    diesel::update(user.filter(id.eq(uid))).set(pass_hash.eq(new_hash)).execute(&mut conn).unwrap();
+    diesel::update(user.filter(id.eq(uid)))
+      .set(pass_hash.eq(new_hash))
+      .execute(&mut pool.get().unwrap())
+      .unwrap();
   })
   .await?;
   Ok(HttpResponse::Ok().json(tpair))

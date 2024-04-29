@@ -34,3 +34,36 @@ macro_rules! clone {
     }
   );
 }
+
+#[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BoardDetails {
+  pub id: i64,
+  pub name: String,
+  pub version: i32,
+  pub owner_id: i64,
+  pub public_mut: bool,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BoardPatch {
+  pub name: Option<String>,
+  pub public_mut: Option<bool>,
+  pub owner_id: Option<i64>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct NewBoardForm {
+  pub name: String,
+  pub public_mut: bool,
+  pub layout: String,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct FreshBoard {
+  pub id: i64,
+  pub url: i64,
+}

@@ -7,6 +7,7 @@ use std::time::Duration;
 
 use common::{clone, from_epoch_secs, TokenPair};
 use gloo_console::log;
+use gloo_net::http::RequestBuilder;
 use gloo_storage::errors::StorageError;
 use gloo_storage::{LocalStorage, Storage};
 use jwt::FromBase64;
@@ -17,8 +18,8 @@ use web_sys::wasm_bindgen::{JsCast, JsValue};
 use web_sys::BroadcastChannel;
 use yew::hook;
 
-use crate::boot;
 use crate::misc_yew::{now, u32rand};
+use crate::{api, boot};
 
 #[derive(Serialize, Deserialize)]
 enum RtrMsg {
@@ -127,4 +128,17 @@ pub fn use_token_pair() -> Option<TokenPair> {
     }),
   );
   token_pair.deref().clone()
+}
+
+pub fn authenticated(
+  f: impl FnOnce(&str) -> RequestBuilder,
+  token: Option<&str>,
+  sub: &str,
+) -> RequestBuilder {
+  let base = f(&api(sub));
+  if let Some(token) = token {
+    base.header("Authorization", &format!("Bearer {token}"))
+  } else {
+    base
+  }
 }

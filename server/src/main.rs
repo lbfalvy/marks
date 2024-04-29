@@ -3,15 +3,19 @@
 
 mod auth;
 mod bearer_token;
+mod boards;
 mod db;
 mod schema;
+mod views;
 
 use actix_cors::Cors;
 use actix_web::middleware::Logger;
 use actix_web::{get, web, App, HttpResponse, HttpServer, Responder};
-use auth::{change_pass, login, refresh, register};
+use auth::cfg_auth;
+use boards::cfg_boards;
 use db::create_pool;
 use dotenvy::dotenv;
+use views::cfg_views;
 
 #[actix_web::main]
 async fn main() -> std::io::Result<()> {
@@ -20,11 +24,10 @@ async fn main() -> std::io::Result<()> {
     App::new()
       .wrap(Logger::default())
       .app_data(web::Data::new(create_pool()))
+      .configure(cfg_auth)
+      .configure(cfg_views)
+      .configure(cfg_boards)
       .service(hello)
-      .service(login)
-      .service(register)
-      .service(refresh)
-      .service(change_pass)
       .wrap(Cors::permissive())
   })
   .bind(("0.0.0.0", 8081))?

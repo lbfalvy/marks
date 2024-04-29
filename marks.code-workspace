@@ -19,5 +19,6 @@
 				"database": "server/database.sqlite"
 			}
 		],
+		"rust-analyzer.showUnlinkedFileNotification": false,
 	}
 }

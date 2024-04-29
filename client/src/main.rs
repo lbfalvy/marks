@@ -4,18 +4,23 @@
 mod about;
 mod app;
 mod auth;
+mod board;
+mod layout;
 mod misc_yew;
 mod not_found;
 mod rtr_client;
+mod util;
 
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use app::App;
 use gloo_console::log;
 use gloo_net::http::Request;
-use gloo_utils::errors::JsError;
 use misc_yew::now;
 use rtr_client::run_rtr;
+
+use crate::rtr_client::authenticated;
+use crate::util::retry;
 
 static mut BOOT: Option<SystemTime> = None;
 /// Get the time when the `main` function was called
@@ -33,25 +38,16 @@ pub fn spawn_rtr() {
     Duration::from_secs(5 * 60),
     Duration::from_secs(10),
     |refresh| async move {
-      loop {
-        let rep = Request::post(&api("auth/refresh"))
-          .header("Authorization", &format!("Bearer {refresh}"))
-          .send()
-          .await;
-        match rep {
-          // network error or some such
-          Err(gloo_net::Error::JsError(JsError { name, message, .. })) => {
-            log!(name, ": ", message);
-            yew::platform::time::sleep(Duration::from_secs(5)).await;
-          },
-          // session expired or invalidated due to token reuse
-          Ok(rep) if [409, 441].contains(&rep.status()) => break None,
-          // new token pair
-          Ok(rep) if rep.ok() => break Some(rep.json().await.unwrap()),
-          Err(e) => panic!("{e}"),
-          // !rep.ok()
-          Ok(rep) => panic!("{rep:?}"),
-        }
+      let rep = retry(Duration::from_secs(5), || async {
+        authenticated(Request::post, Some(&refresh), "auth/refresh")
+      })
+      .await;
+      if [409, 441].contains(&rep.status()) {
+        None // session expired or invalidated due to token reuse
+      } else if rep.ok() {
+        Some(rep.json().await.unwrap()) // new token pair
+      } else {
+        panic!("{rep:?}") // unrecognized error condition
       }
     },
   ))

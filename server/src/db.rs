@@ -33,3 +33,16 @@ pub struct Session {
   pub start: i64,
   pub refresh: i64,
 }
+
+#[derive(Debug, Clone, Hash, PartialEq, Eq, Queryable, Selectable, Insertable)]
+#[diesel(table_name = schema::board)]
+#[diesel(check_for_backend(diesel::sqlite::Sqlite))]
+pub struct Board {
+  pub id: i64,
+  pub name: String,
+  pub url: i64,
+  pub version: i32,
+  pub owner_id: i64,
+  pub public_mut: bool,
+  pub layout: String,
+}
